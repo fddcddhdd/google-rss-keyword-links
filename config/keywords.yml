@@ -1,0 +1,9 @@
+site_title: "毎日のリンク集"
+max_items_per_keyword: 10
+
+# Google News RSS検索に投げるキーワードを並べる
+keywords:
+  - "生成AI"
+  - "GitHub Actions"
+  - "ビットコイン"
+  - "東京 ランチ"
