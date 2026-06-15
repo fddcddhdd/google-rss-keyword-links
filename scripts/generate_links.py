@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 import html
 import json
 import pathlib
@@ -24,6 +25,25 @@ def google_news_rss_url(keyword: str) -> str:
     return f"https://news.google.com/rss/search?q={query}&hl=ja&gl=JP&ceid=JP:ja"
 
 
+def entry_datetime(entry) -> datetime | None:
+    """RSS項目の公開日時または更新日時をJSTのdatetimeに変換する。"""
+    time_value = getattr(entry, "published_parsed", None) or getattr(entry, "updated_parsed", None)
+    if not time_value:
+        return None
+
+    timestamp = calendar.timegm(time_value)
+    return datetime.fromtimestamp(timestamp, tz=TIMEZONE)
+
+
+def sort_items_newest_first(items: list[dict]) -> list[dict]:
+    """公開日時が新しい順に記事を並べ替える。日時不明の記事は末尾に回す。"""
+    return sorted(
+        items,
+        key=lambda item: item.get("published_timestamp") or 0,
+        reverse=True,
+    )
+
+
 def fetch_items(keyword: str, max_items: int) -> list[dict]:
     """キーワードに対応するRSSを取得して記事一覧に整形する。"""
     url = google_news_rss_url(keyword)
@@ -44,7 +64,9 @@ def fetch_items(keyword: str, max_items: int) -> list[dict]:
         if hasattr(entry, "source"):
             source = getattr(entry.source, "title", "") or ""
 
-        published = getattr(entry, "published", "")
+        published_dt = entry_datetime(entry)
+        published = published_dt.strftime("%Y-%m-%d %H:%M") if published_dt else getattr(entry, "published", "")
+        published_timestamp = int(published_dt.timestamp()) if published_dt else 0
 
         items.append(
             {
@@ -52,11 +74,12 @@ def fetch_items(keyword: str, max_items: int) -> list[dict]:
                 "title": title,
                 "link": link,
                 "published": published,
+                "published_timestamp": published_timestamp,
                 "source": source,
             }
         )
 
-    return items
+    return sort_items_newest_first(items)
 
 
 def load_config() -> dict:
@@ -211,7 +234,7 @@ def main() -> None:
                 continue
             seen_links.add(link)
             items.append(item)
-        items_by_keyword[keyword] = items
+        items_by_keyword[keyword] = sort_items_newest_first(items)
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     (OUTPUT_DIR / ".nojekyll").write_text("", encoding="utf-8")
