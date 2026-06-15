@@ -79,7 +79,7 @@ def fetch_items(keyword: str, max_items: int) -> list[dict]:
             }
         )
 
-    return sort_items_newest_first(items)
+    return items
 
 
 def load_config() -> dict:
@@ -96,7 +96,23 @@ def load_config() -> dict:
     return config
 
 
-def render_html(site_title: str, items_by_keyword: dict[str, list[dict]]) -> str:
+def collect_all_items(keywords: list[str], max_items_per_keyword: int) -> list[dict]:
+    """全キーワードの記事を1つの一覧にまとめ、新しい順に並べる。"""
+    seen_links: set[str] = set()
+    all_items: list[dict] = []
+
+    for keyword in keywords:
+        for item in fetch_items(keyword, max_items_per_keyword):
+            link = item["link"]
+            if link in seen_links:
+                continue
+            seen_links.add(link)
+            all_items.append(item)
+
+    return sort_items_newest_first(all_items)
+
+
+def render_html(site_title: str, keywords: list[str], all_items: list[dict]) -> str:
     """リンク集ページのHTMLを生成する。"""
     now = datetime.now(TIMEZONE)
     generated_at = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -126,9 +142,6 @@ header {
   margin-bottom: 2rem;
   padding-bottom: 1rem;
 }
-section {
-  margin: 2.4rem 0;
-}
 ol {
   padding-left: 1.4rem;
 }
@@ -143,9 +156,17 @@ a {
   opacity: 0.72;
   font-size: 0.92rem;
 }
-.keyword-nav a {
+.keyword-list {
+  margin-top: 0.8rem;
+}
+.keyword-tag {
+  border: 1px solid currentColor;
+  border-radius: 999px;
   display: inline-block;
-  margin: 0 0.6rem 0.4rem 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  margin-right: 0.35rem;
+  padding: 0.08rem 0.55rem;
 }
 .empty {
   opacity: 0.7;
@@ -165,33 +186,28 @@ footer {
     parts.append("<header>")
     parts.append(f"<h1>{html.escape(site_title)}</h1>")
     parts.append(f'<div class="meta">生成日時: {html.escape(generated_at)} JST</div>')
-    parts.append('<nav class="keyword-nav" aria-label="キーワード一覧">')
+    parts.append(f'<div class="meta">取得記事数: {len(all_items)}</div>')
 
-    for keyword in items_by_keyword:
-        anchor = urllib.parse.quote(keyword)
-        parts.append(f'<a href="#{anchor}">{html.escape(keyword)}</a>')
+    if keywords:
+        escaped_keywords = [html.escape(keyword) for keyword in keywords]
+        parts.append(f'<div class="keyword-list">対象キーワード: {" / ".join(escaped_keywords)}</div>')
 
-    parts.append("</nav>")
     parts.append("</header>")
 
-    for keyword, items in items_by_keyword.items():
-        anchor = urllib.parse.quote(keyword)
-        parts.append(f'<section id="{anchor}">')
-        parts.append(f"<h2>{html.escape(keyword)}</h2>")
-
-        if not items:
-            parts.append('<p class="empty">記事が見つかりませんでした。</p>')
-            parts.append("</section>")
-            continue
-
+    if not all_items:
+        parts.append('<p class="empty">記事が見つかりませんでした。</p>')
+    else:
         parts.append("<ol>")
-        for item in items:
+        for item in all_items:
             title = html.escape(item["title"])
             link = html.escape(item["link"])
             source = html.escape(item.get("source", ""))
             published = html.escape(item.get("published", ""))
+            keyword = html.escape(item.get("keyword", ""))
 
             meta_parts = []
+            if keyword:
+                meta_parts.append(f'<span class="keyword-tag">{keyword}</span>')
             if source:
                 meta_parts.append(source)
             if published:
@@ -205,7 +221,6 @@ footer {
             parts.append("</li>")
 
         parts.append("</ol>")
-        parts.append("</section>")
 
     parts.append("<footer>")
     parts.append("Google News RSS検索結果を元に自動生成しています。リンク先の内容は各配信元を確認してください。")
@@ -221,26 +236,15 @@ def main() -> None:
     config = load_config()
     site_title = str(config.get("site_title", "毎日のリンク集"))
     keywords = [str(keyword).strip() for keyword in config.get("keywords", []) if str(keyword).strip()]
-    max_items = int(config.get("max_items_per_keyword", 10))
+    max_items_per_keyword = int(config.get("max_items_per_keyword", 10))
 
-    seen_links: set[str] = set()
-    items_by_keyword: dict[str, list[dict]] = {}
-
-    for keyword in keywords:
-        items: list[dict] = []
-        for item in fetch_items(keyword, max_items):
-            link = item["link"]
-            if link in seen_links:
-                continue
-            seen_links.add(link)
-            items.append(item)
-        items_by_keyword[keyword] = sort_items_newest_first(items)
+    all_items = collect_all_items(keywords, max_items_per_keyword)
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     (OUTPUT_DIR / ".nojekyll").write_text("", encoding="utf-8")
-    (OUTPUT_DIR / "index.html").write_text(render_html(site_title, items_by_keyword), encoding="utf-8")
+    (OUTPUT_DIR / "index.html").write_text(render_html(site_title, keywords, all_items), encoding="utf-8")
     (OUTPUT_DIR / "links.json").write_text(
-        json.dumps(items_by_keyword, ensure_ascii=False, indent=2),
+        json.dumps(all_items, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 

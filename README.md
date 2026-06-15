@@ -2,6 +2,8 @@
 
 GitHub Actions と GitHub Pages で、Google News RSS検索結果から毎日リンク集ページを自動生成する最小構成です。
 
+複数キーワードで取得した記事を1つの一覧にまとめ、公開日時が新しい順に表示します。
+
 ## 使い方
 
 1. このZIPを展開する
@@ -15,7 +17,7 @@ GitHub Actions と GitHub Pages で、Google News RSS検索結果から毎日リ
 GitHub Actions 実行時に `_site` 配下へ以下を生成します。
 
 - `index.html`: 公開用のリンク集ページ
-- `links.json`: 取得結果のJSON
+- `links.json`: 取得結果のJSON。全記事を公開日時の新しい順に並べた配列です
 - `.nojekyll`: Jekyll処理を無効化するための空ファイル
 
 ## 定期実行時刻
@@ -41,6 +43,8 @@ keywords:
   - "GitHub Actions"
   - "ビットコイン"
 ```
+
+`max_items_per_keyword` は、各キーワードごとにRSSから取得する最大件数です。表示はキーワード別ではなく、全キーワードの記事をまとめて新しい順になります。
 
 ## 注意
 
