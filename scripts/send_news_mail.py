@@ -114,6 +114,46 @@ def decode_google_news_url(url: str) -> str:
     return url
 
 
+def decode_response_html(response: requests.Response) -> str:
+    """HTMLの文字コードを複数の手掛かりから判定してUnicode文字列へ変換する。"""
+    raw = response.content
+    candidates: list[str] = []
+
+    content_type = response.headers.get("content-type", "")
+    header_match = re.search(r"charset\s*=\s*[\"']?([^;\s\"']+)", content_type, flags=re.IGNORECASE)
+    if header_match:
+        candidates.append(header_match.group(1))
+
+    head = raw[:16_384]
+    meta_patterns = [
+        rb"<meta[^>]+charset\s*=\s*[\"']?\s*([A-Za-z0-9._:-]+)",
+        rb"<meta[^>]+content\s*=\s*[\"'][^\"']*charset\s*=\s*([A-Za-z0-9._:-]+)",
+    ]
+    for pattern in meta_patterns:
+        match = re.search(pattern, head, flags=re.IGNORECASE)
+        if match:
+            candidates.append(match.group(1).decode("ascii", errors="ignore"))
+
+    apparent = response.apparent_encoding
+    if apparent:
+        candidates.append(apparent)
+
+    candidates.extend(["utf-8", "cp932", "shift_jis", "euc_jp"])
+
+    seen: set[str] = set()
+    for encoding in candidates:
+        normalized = encoding.strip().lower().replace("_", "-")
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        try:
+            return raw.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+
+    return raw.decode("utf-8", errors="replace")
+
+
 def fetch_article_text(session: requests.Session, url: str, max_chars: int) -> tuple[str, str]:
     """記事URLから本文を抽出し、実際に取得できたURLと本文を返す。"""
     source_url = decode_google_news_url(url)
@@ -135,8 +175,9 @@ def fetch_article_text(session: requests.Session, url: str, max_chars: int) -> t
         if len(response.content) > 6_000_000:
             return response.url, ""
 
+        decoded_html = decode_response_html(response)
         text = extract(
-            response.text,
+            decoded_html,
             include_comments=False,
             include_tables=False,
             favor_precision=True,
