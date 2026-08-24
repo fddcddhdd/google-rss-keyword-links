@@ -1,6 +1,16 @@
 site_title: "毎日のリンク集"
 max_items_per_keyword: 10
 
+mail:
+  # 過去何時間分の記事を朝刊候補にするか
+  hours_back: 36
+  # 1通に収録する最大記事数
+  max_articles: 30
+  # 1記事あたりの本文最大文字数
+  max_chars_per_article: 8000
+  # メール全体の最大サイズ。約2.5MBに抑える
+  max_mail_bytes: 2500000
+
 # Google News RSS検索に投げるキーワードを並べる
 keywords:
   - "ひむ太郎"
@@ -114,7 +124,7 @@ keywords:
   - "古代ローマ"
   - "古代ギリシ"
   - "アラフィフ"
-  - "50代"  
+  - "50代"
   - "アラフォー"
   - "40代"
   - "合羽橋"
