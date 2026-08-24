@@ -35,7 +35,6 @@ jobs:
         run: python scripts/generate_links.py
 
       - name: オフライン用朝刊メールを送信
-        if: ${{ secrets.SMTP_USERNAME != '' && secrets.SMTP_PASSWORD != '' && secrets.MAIL_TO != '' }}
         env:
           SMTP_HOST: smtp.gmail.com
           SMTP_PORT: "465"
@@ -44,11 +43,12 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
           MAIL_FROM: ${{ secrets.SMTP_USERNAME }}
-        run: python scripts/send_news_mail.py
-
-      - name: SMTP未設定時の案内
-        if: ${{ secrets.SMTP_USERNAME == '' || secrets.SMTP_PASSWORD == '' || secrets.MAIL_TO == '' }}
-        run: echo "SMTP関連のGitHub Secretsが未設定のため、朝刊メール送信はスキップします。"
+        run: |
+          if [ -z "$SMTP_USERNAME" ] || [ -z "$SMTP_PASSWORD" ] || [ -z "$MAIL_TO" ]; then
+            echo "SMTP関連のGitHub Secretsが未設定のため、朝刊メール送信はスキップします。"
+            exit 0
+          fi
+          python scripts/send_news_mail.py
 
       - name: Pagesを設定
         uses: actions/configure-pages@v5
