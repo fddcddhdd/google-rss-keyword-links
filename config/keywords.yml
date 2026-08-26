@@ -4,10 +4,16 @@ max_items_per_keyword: 10
 mail:
   # 過去何時間分の記事を朝刊候補にするか
   hours_back: 36
-  # 1通に収録する最大記事数
+  # 本文取得失敗を補充できるよう、最大120件まで候補を調べる
+  max_candidates: 120
+  # 本文取得に成功した記事を最大30件収録する
   max_articles: 30
-  # 1記事あたりの本文最大文字数
-  max_chars_per_article: 8000
+  # Web版として保持する1記事あたりの本文最大文字数
+  max_fetch_chars_per_article: 8000
+  # メールでは長文を最大4000文字までにする
+  max_mail_chars_per_article: 4000
+  # Web版では最初の600文字を表示し、残りを「全文を読む」に格納する
+  web_preview_chars: 600
   # メール全体の最大サイズ。約2.5MBに抑える
   max_mail_bytes: 2500000
 
