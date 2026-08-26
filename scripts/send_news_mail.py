@@ -29,6 +29,15 @@ USER_AGENT = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
 )
+PAYWALL_MARKERS = (
+    "この記事は有料",
+    "有料会員限定",
+    "会員限定",
+    "続きを読むには",
+    "ログインしてください",
+    "会員登録が必要",
+    "会員登録してください",
+)
 
 
 def load_yaml_config() -> dict:
@@ -71,8 +80,8 @@ def normalize_title(title: str) -> str:
     return re.sub(r"\s+", "", title).lower()
 
 
-def select_items(items: list[dict], max_articles: int, hours_back: int) -> list[dict]:
-    """新しい記事だけを選び、タイトルの重複も除外する。"""
+def select_candidates(items: list[dict], hours_back: int, max_candidates: int) -> list[dict]:
+    """対象期間の新しい記事を候補として選び、タイトルの重複も除外する。"""
     cutoff = int((datetime.now(TIMEZONE) - timedelta(hours=hours_back)).timestamp())
     selected: list[dict] = []
     seen_titles: set[str] = set()
@@ -93,7 +102,7 @@ def select_items(items: list[dict], max_articles: int, hours_back: int) -> list[
         seen_titles.add(title_key)
         selected.append(item)
 
-        if len(selected) >= max_articles:
+        if max_candidates > 0 and len(selected) >= max_candidates:
             break
 
     return selected
@@ -194,6 +203,27 @@ def fetch_article_text(session: requests.Session, url: str, max_chars: int) -> t
         return source_url, ""
 
 
+def is_usable_article_text(text: str) -> bool:
+    """本文として十分読める内容かを簡易判定する。"""
+    stripped = text.strip()
+    if len(stripped) < 120:
+        return False
+
+    # 短い課金・会員誘導だけが取れた記事は朝刊から除外する。
+    if len(stripped) < 1500 and any(marker in stripped for marker in PAYWALL_MARKERS):
+        return False
+
+    return True
+
+
+def truncate_for_mail(text: str, max_chars: int) -> str:
+    """メールでは長過ぎる本文を読みやすい長さに切り詰める。"""
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+
+    return text[:max_chars].rstrip() + "\n\n（メールではここまで。続きはWeb版または配信元の記事で読めます）"
+
+
 def text_to_html(text: str) -> str:
     """抽出本文を表示用HTMLへ変換する。"""
     paragraphs = [part.strip() for part in re.split(r"\n{2,}", text) if part.strip()]
@@ -203,8 +233,30 @@ def text_to_html(text: str) -> str:
     return "\n".join(f"<p>{html.escape(part).replace(chr(10), '<br>')}</p>" for part in paragraphs)
 
 
-def render_mail_html(site_title: str, articles: list[dict], generated_at: str) -> str:
-    """メールとGitHub Pagesで共通利用する朝刊HTMLを作る。"""
+def article_meta_html(article: dict) -> str:
+    """記事のキーワード・配信元・日時をHTMLにする。"""
+    source = html.escape(str(article.get("source") or ""))
+    published = html.escape(str(article.get("published") or ""))
+    keyword = html.escape(str(article.get("keyword") or ""))
+
+    meta_parts = []
+    if keyword:
+        meta_parts.append(f'<span class="keyword">{keyword}</span>')
+    if source:
+        meta_parts.append(source)
+    if published:
+        meta_parts.append(published)
+
+    return " / ".join(meta_parts)
+
+
+def render_mail_html(
+    site_title: str,
+    articles: list[dict],
+    generated_at: str,
+    max_mail_chars: int,
+) -> str:
+    """メール向けに長文を抑えた朝刊HTMLを作る。"""
     parts = [
         "<!doctype html>",
         '<html lang="ja">',
@@ -216,7 +268,7 @@ def render_mail_html(site_title: str, articles: list[dict], generated_at: str) -
         "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.75;max-width:760px;margin:0 auto;padding:20px;color:#222;background:#fff}",
         "h1{font-size:1.6rem}h2{font-size:1.18rem;margin-top:2.2rem;padding-top:1.2rem;border-top:1px solid #ddd}",
         ".meta{font-size:.86rem;color:#666}.keyword{display:inline-block;border:1px solid #bbb;border-radius:999px;padding:0 .55rem;margin-right:.4rem;font-size:.78rem}",
-        ".fallback{padding:12px;background:#f5f5f5;border-radius:8px}.source-link{word-break:break-all}p{margin:.9rem 0}",
+        ".source-link{word-break:break-all}p{margin:.9rem 0}",
         "</style>",
         "</head>",
         "<body>",
@@ -226,28 +278,76 @@ def render_mail_html(site_title: str, articles: list[dict], generated_at: str) -
 
     for index, article in enumerate(articles, start=1):
         title = html.escape(str(article.get("title") or "無題"))
-        source = html.escape(str(article.get("source") or ""))
-        published = html.escape(str(article.get("published") or ""))
-        keyword = html.escape(str(article.get("keyword") or ""))
         source_url = html.escape(str(article.get("source_url") or article.get("link") or ""), quote=True)
-        article_text = str(article.get("article_text") or "").strip()
-
-        meta_parts = []
-        if keyword:
-            meta_parts.append(f'<span class="keyword">{keyword}</span>')
-        if source:
-            meta_parts.append(source)
-        if published:
-            meta_parts.append(published)
+        article_text = truncate_for_mail(str(article.get("article_text") or "").strip(), max_mail_chars)
+        meta = article_meta_html(article)
 
         parts.append(f"<h2>{index}. {title}</h2>")
-        if meta_parts:
-            parts.append(f'<div class="meta">{" / ".join(meta_parts)}</div>')
+        if meta:
+            parts.append(f'<div class="meta">{meta}</div>')
 
-        if article_text:
-            parts.append(text_to_html(article_text))
+        parts.append(text_to_html(article_text))
+
+        if source_url:
+            parts.append(f'<p class="source-link"><a href="{source_url}">配信元の記事を開く</a></p>')
+
+    parts.extend(
+        [
+            "<hr>",
+            '<p class="meta">Google News RSSを起点に、個人のオフライン閲覧用として自動生成した朝刊です。本文を取得できない記事は除外しています。</p>',
+            "</body>",
+            "</html>",
+        ]
+    )
+    return "\n".join(parts)
+
+
+def render_web_html(
+    site_title: str,
+    articles: list[dict],
+    generated_at: str,
+    preview_chars: int,
+) -> str:
+    """GitHub Pages向けに長文を折りたためる朝刊HTMLを作る。"""
+    parts = [
+        "<!doctype html>",
+        '<html lang="ja">',
+        "<head>",
+        '<meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        f"<title>{html.escape(site_title)} 朝刊</title>",
+        "<style>",
+        "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.75;max-width:760px;margin:0 auto;padding:20px;color:#222;background:#fff}",
+        "h1{font-size:1.6rem}h2{font-size:1.18rem;margin-top:2.2rem;padding-top:1.2rem;border-top:1px solid #ddd}",
+        ".meta{font-size:.86rem;color:#666}.keyword{display:inline-block;border:1px solid #bbb;border-radius:999px;padding:0 .55rem;margin-right:.4rem;font-size:.78rem}",
+        ".source-link{word-break:break-all}p{margin:.9rem 0}details{margin:.7rem 0 1rem}summary{cursor:pointer;font-weight:600;color:#1565c0}details[open] summary{margin-bottom:.7rem}.details-body{padding-left:.2rem}",
+        "</style>",
+        "</head>",
+        "<body>",
+        f"<h1>{html.escape(site_title)} 朝刊</h1>",
+        f'<div class="meta">生成日時: {html.escape(generated_at)} JST / 収録: {len(articles)}記事</div>',
+    ]
+
+    for index, article in enumerate(articles, start=1):
+        title = html.escape(str(article.get("title") or "無題"))
+        source_url = html.escape(str(article.get("source_url") or article.get("link") or ""), quote=True)
+        article_text = str(article.get("article_text") or "").strip()
+        meta = article_meta_html(article)
+
+        parts.append(f"<h2>{index}. {title}</h2>")
+        if meta:
+            parts.append(f'<div class="meta">{meta}</div>')
+
+        if preview_chars > 0 and len(article_text) > preview_chars:
+            preview = article_text[:preview_chars].rstrip()
+            remaining = article_text[preview_chars:].lstrip()
+            parts.append(text_to_html(preview + "…"))
+            parts.append("<details>")
+            parts.append("<summary>全文を読む</summary>")
+            parts.append(f'<div class="details-body">{text_to_html(remaining)}</div>')
+            parts.append("</details>")
         else:
-            parts.append('<p class="fallback">この記事は本文を自動取得できませんでした。オンライン時に配信元リンクを開いてください。</p>')
+            parts.append(text_to_html(article_text))
 
         if source_url:
             parts.append(
@@ -257,7 +357,7 @@ def render_mail_html(site_title: str, articles: list[dict], generated_at: str) -
     parts.extend(
         [
             "<hr>",
-            '<p class="meta">Google News RSSを起点に、個人閲覧用として自動生成した朝刊です。記事本文を取得できないサイトはリンクのみ掲載します。</p>',
+            '<p class="meta">Google News RSSを起点に、個人閲覧用として自動生成した朝刊です。本文を取得できない記事は除外しています。</p>',
             "</body>",
             "</html>",
         ]
@@ -265,7 +365,12 @@ def render_mail_html(site_title: str, articles: list[dict], generated_at: str) -
     return "\n".join(parts)
 
 
-def render_mail_text(site_title: str, articles: list[dict], generated_at: str) -> str:
+def render_mail_text(
+    site_title: str,
+    articles: list[dict],
+    generated_at: str,
+    max_mail_chars: int,
+) -> str:
     """HTMLを表示できないメールアプリ向けのプレーンテキストを作る。"""
     lines = [f"{site_title} 朝刊", f"生成日時: {generated_at} JST", ""]
 
@@ -279,11 +384,8 @@ def render_mail_text(site_title: str, articles: list[dict], generated_at: str) -
         if meta:
             lines.append(meta)
 
-        article_text = str(article.get("article_text") or "").strip()
-        if article_text:
-            lines.append(article_text)
-        else:
-            lines.append("本文を自動取得できませんでした。")
+        article_text = truncate_for_mail(str(article.get("article_text") or "").strip(), max_mail_chars)
+        lines.append(article_text)
 
         source_url = str(article.get("source_url") or article.get("link") or "")
         if source_url:
@@ -300,21 +402,26 @@ def make_message(
     site_title: str,
     articles: list[dict],
     generated_at: str,
+    max_mail_chars: int,
 ) -> EmailMessage:
     """HTMLとプレーンテキストの両方を持つメールを作る。"""
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = sender
     message["To"] = recipient
-    message.set_content(render_mail_text(site_title, articles, generated_at))
-    message.add_alternative(render_mail_html(site_title, articles, generated_at), subtype="html")
+    message.set_content(render_mail_text(site_title, articles, generated_at, max_mail_chars))
+    message.add_alternative(
+        render_mail_html(site_title, articles, generated_at, max_mail_chars),
+        subtype="html",
+    )
     return message
 
 
 def collect_articles(
     items: list[dict],
     max_articles: int,
-    max_chars_per_article: int,
+    max_fetch_chars: int,
+    max_mail_chars: int,
     max_mail_bytes: int,
     site_title: str,
     sender: str,
@@ -322,18 +429,33 @@ def collect_articles(
     subject: str,
     generated_at: str,
 ) -> tuple[list[dict], EmailMessage]:
-    """本文を取得しつつ、実際のメールサイズが上限を超えないところまで収録する。"""
+    """本文取得に成功した記事だけを集め、最大件数まで次の記事で補充する。"""
     session = requests.Session()
     articles: list[dict] = []
-    message = make_message(subject, sender, recipient, site_title, articles, generated_at)
+    skipped = 0
+    message = make_message(
+        subject,
+        sender,
+        recipient,
+        site_title,
+        articles,
+        generated_at,
+        max_mail_chars,
+    )
 
     for index, item in enumerate(items, start=1):
         print(f"[{index}/{len(items)}] {item.get('title', '')}")
         source_url, article_text = fetch_article_text(
             session,
             str(item.get("link") or ""),
-            max_chars_per_article,
+            max_fetch_chars,
         )
+
+        if not is_usable_article_text(article_text):
+            skipped += 1
+            print("本文を十分取得できないため、この記事は除外します。")
+            time.sleep(0.25)
+            continue
 
         article = dict(item)
         article["source_url"] = source_url
@@ -347,6 +469,7 @@ def collect_articles(
             site_title,
             candidate_articles,
             generated_at,
+            max_mail_chars,
         )
 
         if len(candidate_message.as_bytes()) > max_mail_bytes:
@@ -360,14 +483,20 @@ def collect_articles(
         if len(articles) >= max_articles:
             break
 
+    print(f"本文取得失敗などで除外した記事数: {skipped}")
     return articles, message
 
 
-def write_web_page(site_title: str, articles: list[dict], generated_at: str) -> None:
-    """メールと同じ朝刊HTMLをGitHub Pages用のindex.htmlへ保存する。"""
+def write_web_page(
+    site_title: str,
+    articles: list[dict],
+    generated_at: str,
+    preview_chars: int,
+) -> None:
+    """長文を折りたためる朝刊HTMLをGitHub Pages用のindex.htmlへ保存する。"""
     WEB_PATH.parent.mkdir(exist_ok=True)
     WEB_PATH.write_text(
-        render_mail_html(site_title, articles, generated_at),
+        render_web_html(site_title, articles, generated_at, preview_chars),
         encoding="utf-8",
     )
     print(f"GitHub Pages用の朝刊を生成しました: {WEB_PATH}")
@@ -408,10 +537,13 @@ def main() -> None:
     config = load_yaml_config()
     mail_config = config.get("mail") or {}
     site_title = str(config.get("site_title", "毎日のリンク集"))
-    max_articles = int(mail_config.get("max_articles", 30))
-    max_chars_per_article = int(mail_config.get("max_chars_per_article", 8000))
-    max_mail_bytes = int(mail_config.get("max_mail_bytes", 2_500_000))
     hours_back = int(mail_config.get("hours_back", 36))
+    max_articles = int(mail_config.get("max_articles", 30))
+    max_candidates = int(mail_config.get("max_candidates", 120))
+    max_fetch_chars = int(mail_config.get("max_fetch_chars_per_article", 8000))
+    max_mail_chars = int(mail_config.get("max_mail_chars_per_article", 4000))
+    web_preview_chars = int(mail_config.get("web_preview_chars", 600))
+    max_mail_bytes = int(mail_config.get("max_mail_bytes", 2_500_000))
 
     smtp_username = os.getenv("SMTP_USERNAME", "").strip()
     sender = os.getenv("MAIL_FROM", smtp_username or "offline-news@example.invalid").strip()
@@ -421,7 +553,11 @@ def main() -> None:
     generated_at = now.strftime("%Y-%m-%d %H:%M:%S")
     subject = f"【朝刊】{site_title} {now.strftime('%Y-%m-%d')}"
 
-    items = select_items(load_links(), max_articles=max_articles, hours_back=hours_back)
+    items = select_candidates(
+        load_links(),
+        hours_back=hours_back,
+        max_candidates=max_candidates,
+    )
     if not items:
         print("対象期間の記事がないため、朝刊生成を終了します。")
         return
@@ -429,7 +565,8 @@ def main() -> None:
     articles, message = collect_articles(
         items,
         max_articles=max_articles,
-        max_chars_per_article=max_chars_per_article,
+        max_fetch_chars=max_fetch_chars,
+        max_mail_chars=max_mail_chars,
         max_mail_bytes=max_mail_bytes,
         site_title=site_title,
         sender=sender,
@@ -445,8 +582,12 @@ def main() -> None:
     print(f"収録記事数: {len(articles)}")
     print(f"メールサイズ: {len(message.as_bytes()):,} bytes")
 
-    # GitHub Pagesもメールと同じ30記事・本文表示にする。
-    write_web_page(site_title, articles, generated_at)
+    write_web_page(
+        site_title,
+        articles,
+        generated_at,
+        web_preview_chars,
+    )
 
     if args.dry_run:
         preview_path = ROOT / "news_mail_preview.eml"
