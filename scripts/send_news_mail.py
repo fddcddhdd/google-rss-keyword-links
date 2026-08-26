@@ -22,6 +22,7 @@ from trafilatura import extract
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LINKS_PATH = ROOT / "_site" / "links.json"
+WEB_PATH = ROOT / "_site" / "index.html"
 CONFIG_PATH = ROOT / "config" / "keywords.yml"
 TIMEZONE = ZoneInfo("Asia/Tokyo")
 USER_AGENT = (
@@ -194,7 +195,7 @@ def fetch_article_text(session: requests.Session, url: str, max_chars: int) -> t
 
 
 def text_to_html(text: str) -> str:
-    """抽出本文をメール表示用HTMLへ変換する。"""
+    """抽出本文を表示用HTMLへ変換する。"""
     paragraphs = [part.strip() for part in re.split(r"\n{2,}", text) if part.strip()]
     if not paragraphs and text.strip():
         paragraphs = [text.strip()]
@@ -203,13 +204,14 @@ def text_to_html(text: str) -> str:
 
 
 def render_mail_html(site_title: str, articles: list[dict], generated_at: str) -> str:
-    """オフライン閲覧向けのHTMLメール本文を作る。"""
+    """メールとGitHub Pagesで共通利用する朝刊HTMLを作る。"""
     parts = [
         "<!doctype html>",
         '<html lang="ja">',
         "<head>",
         '<meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        f"<title>{html.escape(site_title)} 朝刊</title>",
         "<style>",
         "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.75;max-width:760px;margin:0 auto;padding:20px;color:#222;background:#fff}",
         "h1{font-size:1.6rem}h2{font-size:1.18rem;margin-top:2.2rem;padding-top:1.2rem;border-top:1px solid #ddd}",
@@ -248,12 +250,14 @@ def render_mail_html(site_title: str, articles: list[dict], generated_at: str) -
             parts.append('<p class="fallback">この記事は本文を自動取得できませんでした。オンライン時に配信元リンクを開いてください。</p>')
 
         if source_url:
-            parts.append(f'<p class="source-link"><a href="{source_url}">配信元の記事を開く</a></p>')
+            parts.append(
+                f'<p class="source-link"><a href="{source_url}" target="_blank" rel="noopener noreferrer">配信元の記事を開く</a></p>'
+            )
 
     parts.extend(
         [
             "<hr>",
-            '<p class="meta">Google News RSSを起点に、個人のオフライン閲覧用として自動生成したメールです。記事本文を取得できないサイトはリンクのみ掲載します。</p>',
+            '<p class="meta">Google News RSSを起点に、個人閲覧用として自動生成した朝刊です。記事本文を取得できないサイトはリンクのみ掲載します。</p>',
             "</body>",
             "</html>",
         ]
@@ -359,6 +363,16 @@ def collect_articles(
     return articles, message
 
 
+def write_web_page(site_title: str, articles: list[dict], generated_at: str) -> None:
+    """メールと同じ朝刊HTMLをGitHub Pages用のindex.htmlへ保存する。"""
+    WEB_PATH.parent.mkdir(exist_ok=True)
+    WEB_PATH.write_text(
+        render_mail_html(site_title, articles, generated_at),
+        encoding="utf-8",
+    )
+    print(f"GitHub Pages用の朝刊を生成しました: {WEB_PATH}")
+
+
 def send_message(message: EmailMessage) -> None:
     """環境変数のSMTP設定を使ってメールを送信する。"""
     host = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
@@ -386,8 +400,8 @@ def send_message(message: EmailMessage) -> None:
 
 
 def main() -> None:
-    """朝刊メールを生成し、通常実行ではSMTP送信する。"""
-    parser = argparse.ArgumentParser(description="Google News RSSのリンクからオフライン用朝刊メールを生成します。")
+    """朝刊を生成し、GitHub Pagesへ反映するHTMLを作ってメール送信する。"""
+    parser = argparse.ArgumentParser(description="Google News RSSのリンクからオフライン用朝刊を生成します。")
     parser.add_argument("--dry-run", action="store_true", help="送信せず news_mail_preview.eml を保存します。")
     args = parser.parse_args()
 
@@ -409,7 +423,7 @@ def main() -> None:
 
     items = select_items(load_links(), max_articles=max_articles, hours_back=hours_back)
     if not items:
-        print("対象期間の記事がないため、メール送信を終了します。")
+        print("対象期間の記事がないため、朝刊生成を終了します。")
         return
 
     articles, message = collect_articles(
@@ -425,11 +439,14 @@ def main() -> None:
     )
 
     if not articles:
-        print("メールに収録できる記事がありませんでした。")
+        print("朝刊に収録できる記事がありませんでした。")
         return
 
     print(f"収録記事数: {len(articles)}")
     print(f"メールサイズ: {len(message.as_bytes()):,} bytes")
+
+    # GitHub Pagesもメールと同じ30記事・本文表示にする。
+    write_web_page(site_title, articles, generated_at)
 
     if args.dry_run:
         preview_path = ROOT / "news_mail_preview.eml"
