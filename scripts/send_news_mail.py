@@ -217,11 +217,11 @@ def is_usable_article_text(text: str) -> bool:
 
 
 def truncate_for_mail(text: str, max_chars: int) -> str:
-    """メールでは長過ぎる本文を読みやすい長さに切り詰める。"""
+    """メール本文をWeb版の最初の表示と同じ長さに切り詰める。"""
     if max_chars <= 0 or len(text) <= max_chars:
         return text
 
-    return text[:max_chars].rstrip() + "\n\n（メールではここまで。続きはWeb版または配信元の記事で読めます）"
+    return text[:max_chars].rstrip() + "…"
 
 
 def text_to_html(text: str) -> str:
@@ -250,13 +250,29 @@ def article_meta_html(article: dict) -> str:
     return " / ".join(meta_parts)
 
 
+def render_title_index_html(articles: list[dict]) -> str:
+    """ページ先頭に表示する、各記事へジャンプできるタイトル一覧を作る。"""
+    parts = [
+        '<div class="toc" id="news-index">',
+        '<div class="toc-title">ニュース一覧</div>',
+        "<ol>",
+    ]
+
+    for index, article in enumerate(articles, start=1):
+        title = html.escape(str(article.get("title") or "無題"))
+        parts.append(f'<li><a href="#article-{index}">{title}</a></li>')
+
+    parts.extend(["</ol>", "</div>"])
+    return "\n".join(parts)
+
+
 def render_mail_html(
     site_title: str,
     articles: list[dict],
     generated_at: str,
-    max_mail_chars: int,
+    preview_chars: int,
 ) -> str:
-    """メール向けに長文を抑えた朝刊HTMLを作る。"""
+    """Web版の冒頭表示と同じ長さに本文を抑えた朝刊メールHTMLを作る。"""
     parts = [
         "<!doctype html>",
         '<html lang="ja">',
@@ -268,20 +284,24 @@ def render_mail_html(
         "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.75;max-width:760px;margin:0 auto;padding:20px;color:#222;background:#fff}",
         "h1{font-size:1.6rem}h2{font-size:1.18rem;margin-top:2.2rem;padding-top:1.2rem;border-top:1px solid #ddd}",
         ".meta{font-size:.86rem;color:#666}.keyword{display:inline-block;border:1px solid #bbb;border-radius:999px;padding:0 .55rem;margin-right:.4rem;font-size:.78rem}",
+        ".toc{margin:1.5rem 0;padding:1rem 1.2rem;background:#f6f7f8;border-radius:10px}.toc-title{font-weight:700;margin-bottom:.5rem}.toc ol{margin:.4rem 0;padding-left:1.5rem}.toc li{margin:.35rem 0}",
         ".source-link{word-break:break-all}p{margin:.9rem 0}",
         "</style>",
         "</head>",
         "<body>",
         f"<h1>{html.escape(site_title)} 朝刊</h1>",
         f'<div class="meta">生成日時: {html.escape(generated_at)} JST / 収録: {len(articles)}記事</div>',
+        render_title_index_html(articles),
     ]
 
     for index, article in enumerate(articles, start=1):
         title = html.escape(str(article.get("title") or "無題"))
         source_url = html.escape(str(article.get("source_url") or article.get("link") or ""), quote=True)
-        article_text = truncate_for_mail(str(article.get("article_text") or "").strip(), max_mail_chars)
+        article_text = truncate_for_mail(str(article.get("article_text") or "").strip(), preview_chars)
         meta = article_meta_html(article)
 
+        # name属性も付け、メールクライアントでのページ内リンク互換性を高める。
+        parts.append(f'<a id="article-{index}" name="article-{index}"></a>')
         parts.append(f"<h2>{index}. {title}</h2>")
         if meta:
             parts.append(f'<div class="meta">{meta}</div>')
@@ -308,7 +328,7 @@ def render_web_html(
     generated_at: str,
     preview_chars: int,
 ) -> str:
-    """GitHub Pages向けに長文を折りたためる朝刊HTMLを作る。"""
+    """GitHub Pages向けに目次と長文折りたたみを備えた朝刊HTMLを作る。"""
     parts = [
         "<!doctype html>",
         '<html lang="ja">',
@@ -317,15 +337,17 @@ def render_web_html(
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         f"<title>{html.escape(site_title)} 朝刊</title>",
         "<style>",
-        "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.75;max-width:760px;margin:0 auto;padding:20px;color:#222;background:#fff}",
-        "h1{font-size:1.6rem}h2{font-size:1.18rem;margin-top:2.2rem;padding-top:1.2rem;border-top:1px solid #ddd}",
+        "html{scroll-behavior:smooth}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.75;max-width:760px;margin:0 auto;padding:20px;color:#222;background:#fff}",
+        "h1{font-size:1.6rem}h2{font-size:1.18rem;margin-top:2.2rem;padding-top:1.2rem;border-top:1px solid #ddd;scroll-margin-top:1rem}",
         ".meta{font-size:.86rem;color:#666}.keyword{display:inline-block;border:1px solid #bbb;border-radius:999px;padding:0 .55rem;margin-right:.4rem;font-size:.78rem}",
+        ".toc{margin:1.5rem 0;padding:1rem 1.2rem;background:#f6f7f8;border-radius:10px}.toc-title{font-weight:700;margin-bottom:.5rem}.toc ol{margin:.4rem 0;padding-left:1.5rem}.toc li{margin:.35rem 0}",
         ".source-link{word-break:break-all}p{margin:.9rem 0}details{margin:.7rem 0 1rem}summary{cursor:pointer;font-weight:600;color:#1565c0}details[open] summary{margin-bottom:.7rem}.details-body{padding-left:.2rem}",
         "</style>",
         "</head>",
         "<body>",
         f"<h1>{html.escape(site_title)} 朝刊</h1>",
         f'<div class="meta">生成日時: {html.escape(generated_at)} JST / 収録: {len(articles)}記事</div>',
+        render_title_index_html(articles),
     ]
 
     for index, article in enumerate(articles, start=1):
@@ -334,7 +356,7 @@ def render_web_html(
         article_text = str(article.get("article_text") or "").strip()
         meta = article_meta_html(article)
 
-        parts.append(f"<h2>{index}. {title}</h2>")
+        parts.append(f'<h2 id="article-{index}">{index}. {title}</h2>')
         if meta:
             parts.append(f'<div class="meta">{meta}</div>')
 
@@ -369,10 +391,15 @@ def render_mail_text(
     site_title: str,
     articles: list[dict],
     generated_at: str,
-    max_mail_chars: int,
+    preview_chars: int,
 ) -> str:
     """HTMLを表示できないメールアプリ向けのプレーンテキストを作る。"""
-    lines = [f"{site_title} 朝刊", f"生成日時: {generated_at} JST", ""]
+    lines = [f"{site_title} 朝刊", f"生成日時: {generated_at} JST", "", "ニュース一覧"]
+
+    for index, article in enumerate(articles, start=1):
+        lines.append(f"{index}. {article.get('title', '無題')}")
+
+    lines.append("")
 
     for index, article in enumerate(articles, start=1):
         lines.append(f"■ {index}. {article.get('title', '無題')}")
@@ -384,7 +411,7 @@ def render_mail_text(
         if meta:
             lines.append(meta)
 
-        article_text = truncate_for_mail(str(article.get("article_text") or "").strip(), max_mail_chars)
+        article_text = truncate_for_mail(str(article.get("article_text") or "").strip(), preview_chars)
         lines.append(article_text)
 
         source_url = str(article.get("source_url") or article.get("link") or "")
@@ -402,16 +429,16 @@ def make_message(
     site_title: str,
     articles: list[dict],
     generated_at: str,
-    max_mail_chars: int,
+    preview_chars: int,
 ) -> EmailMessage:
     """HTMLとプレーンテキストの両方を持つメールを作る。"""
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = sender
     message["To"] = recipient
-    message.set_content(render_mail_text(site_title, articles, generated_at, max_mail_chars))
+    message.set_content(render_mail_text(site_title, articles, generated_at, preview_chars))
     message.add_alternative(
-        render_mail_html(site_title, articles, generated_at, max_mail_chars),
+        render_mail_html(site_title, articles, generated_at, preview_chars),
         subtype="html",
     )
     return message
@@ -421,7 +448,7 @@ def collect_articles(
     items: list[dict],
     max_articles: int,
     max_fetch_chars: int,
-    max_mail_chars: int,
+    preview_chars: int,
     max_mail_bytes: int,
     site_title: str,
     sender: str,
@@ -440,7 +467,7 @@ def collect_articles(
         site_title,
         articles,
         generated_at,
-        max_mail_chars,
+        preview_chars,
     )
 
     for index, item in enumerate(items, start=1):
@@ -469,7 +496,7 @@ def collect_articles(
             site_title,
             candidate_articles,
             generated_at,
-            max_mail_chars,
+            preview_chars,
         )
 
         if len(candidate_message.as_bytes()) > max_mail_bytes:
@@ -493,7 +520,7 @@ def write_web_page(
     generated_at: str,
     preview_chars: int,
 ) -> None:
-    """長文を折りたためる朝刊HTMLをGitHub Pages用のindex.htmlへ保存する。"""
+    """目次と長文折りたたみを備えた朝刊HTMLをGitHub Pages用に保存する。"""
     WEB_PATH.parent.mkdir(exist_ok=True)
     WEB_PATH.write_text(
         render_web_html(site_title, articles, generated_at, preview_chars),
@@ -541,8 +568,7 @@ def main() -> None:
     max_articles = int(mail_config.get("max_articles", 30))
     max_candidates = int(mail_config.get("max_candidates", 120))
     max_fetch_chars = int(mail_config.get("max_fetch_chars_per_article", 8000))
-    max_mail_chars = int(mail_config.get("max_mail_chars_per_article", 4000))
-    web_preview_chars = int(mail_config.get("web_preview_chars", 600))
+    preview_chars = int(mail_config.get("web_preview_chars", 600))
     max_mail_bytes = int(mail_config.get("max_mail_bytes", 2_500_000))
 
     smtp_username = os.getenv("SMTP_USERNAME", "").strip()
@@ -566,7 +592,7 @@ def main() -> None:
         items,
         max_articles=max_articles,
         max_fetch_chars=max_fetch_chars,
-        max_mail_chars=max_mail_chars,
+        preview_chars=preview_chars,
         max_mail_bytes=max_mail_bytes,
         site_title=site_title,
         sender=sender,
@@ -586,7 +612,7 @@ def main() -> None:
         site_title,
         articles,
         generated_at,
-        web_preview_chars,
+        preview_chars,
     )
 
     if args.dry_run:
