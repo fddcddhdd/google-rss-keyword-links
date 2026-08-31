@@ -3,9 +3,8 @@ name: 毎日のリンク集を生成
 on:
   workflow_dispatch:
   schedule:
-    # JST 06:30 は UTC 21:30
-    - cron: "30 21 * * *"
-
+     # UTC 21:17 = JST 06:17
+    - cron: "17 21 * * *"
 permissions:
   contents: read
   pages: write
