@@ -10,9 +10,7 @@ mail:
   max_articles: 30
   # Web版として保持する1記事あたりの本文最大文字数
   max_fetch_chars_per_article: 8000
-  # メールでは長文を最大4000文字までにする
-  max_mail_chars_per_article: 4000
-  # Web版では最初の600文字を表示し、残りを「全文を読む」に格納する
+  # Web版とメール版は最初の600文字を表示する。Web版だけ残りを「全文を読む」に格納する
   web_preview_chars: 600
   # メール全体の最大サイズ。約2.5MBに抑える
   max_mail_bytes: 2500000
