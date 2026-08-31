@@ -260,7 +260,10 @@ def render_title_index_html(articles: list[dict]) -> str:
 
     for index, article in enumerate(articles, start=1):
         title = html.escape(str(article.get("title") or "無題"))
-        parts.append(f'<li><a href="#article-{index}">{title}</a></li>')
+        # 目次はリンクだらけに見えないよう、通常の本文に近い濃色で表示する。
+        parts.append(
+            f'<li><a href="#article-{index}" style="color:#222;text-decoration:none;">{title}</a></li>'
+        )
 
     parts.extend(["</ol>", "</div>"])
     return "\n".join(parts)
@@ -284,7 +287,7 @@ def render_mail_html(
         "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.75;max-width:760px;margin:0 auto;padding:20px;color:#222;background:#fff}",
         "h1{font-size:1.6rem}h2{font-size:1.18rem;margin-top:2.2rem;padding-top:1.2rem;border-top:1px solid #ddd}",
         ".meta{font-size:.86rem;color:#666}.keyword{display:inline-block;border:1px solid #bbb;border-radius:999px;padding:0 .55rem;margin-right:.4rem;font-size:.78rem}",
-        ".toc{margin:1.5rem 0;padding:1rem 1.2rem;background:#f6f7f8;border-radius:10px}.toc-title{font-weight:700;margin-bottom:.5rem}.toc ol{margin:.4rem 0;padding-left:1.5rem}.toc li{margin:.35rem 0}",
+        ".toc{margin:1.5rem 0;padding:1rem 1.2rem;background:#f6f7f8;border-radius:10px}.toc-title{font-weight:700;margin-bottom:.5rem}.toc ol{margin:.4rem 0;padding-left:1.5rem}.toc li{margin:0;padding:.45rem 0;border-bottom:1px solid #e2e4e7}.toc li:last-child{border-bottom:0}.toc a{color:#222;text-decoration:none}",
         ".source-link{word-break:break-all}p{margin:.9rem 0}",
         "</style>",
         "</head>",
@@ -340,7 +343,7 @@ def render_web_html(
         "html{scroll-behavior:smooth}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.75;max-width:760px;margin:0 auto;padding:20px;color:#222;background:#fff}",
         "h1{font-size:1.6rem}h2{font-size:1.18rem;margin-top:2.2rem;padding-top:1.2rem;border-top:1px solid #ddd;scroll-margin-top:1rem}",
         ".meta{font-size:.86rem;color:#666}.keyword{display:inline-block;border:1px solid #bbb;border-radius:999px;padding:0 .55rem;margin-right:.4rem;font-size:.78rem}",
-        ".toc{margin:1.5rem 0;padding:1rem 1.2rem;background:#f6f7f8;border-radius:10px}.toc-title{font-weight:700;margin-bottom:.5rem}.toc ol{margin:.4rem 0;padding-left:1.5rem}.toc li{margin:.35rem 0}",
+        ".toc{margin:1.5rem 0;padding:1rem 1.2rem;background:#f6f7f8;border-radius:10px}.toc-title{font-weight:700;margin-bottom:.5rem}.toc ol{margin:.4rem 0;padding-left:1.5rem}.toc li{margin:0;padding:.45rem 0;border-bottom:1px solid #e2e4e7}.toc li:last-child{border-bottom:0}.toc a{color:#222;text-decoration:none}.toc a:hover{text-decoration:underline}",
         ".source-link{word-break:break-all}p{margin:.9rem 0}details{margin:.7rem 0 1rem}summary{cursor:pointer;font-weight:600;color:#1565c0}details[open] summary{margin-bottom:.7rem}.details-body{padding-left:.2rem}",
         "</style>",
         "</head>",
