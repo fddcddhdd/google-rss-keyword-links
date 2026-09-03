@@ -251,19 +251,27 @@ def article_meta_html(article: dict) -> str:
 
 
 def render_title_index_html(articles: list[dict]) -> str:
-    """ページ先頭に表示する、各記事へジャンプできるタイトル一覧を作る。"""
+    """ページ先頭に表示する、元記事へ直接移動できるタイトル一覧を作る。"""
     parts = [
         '<div class="toc" id="news-index">',
         '<div class="toc-title">ニュース一覧</div>',
         "<ol>",
     ]
 
-    for index, article in enumerate(articles, start=1):
+    for article in articles:
         title = html.escape(str(article.get("title") or "無題"))
-        # 目次はリンクだらけに見えないよう、通常の本文に近い濃色で表示する。
-        parts.append(
-            f'<li><a href="#article-{index}" style="color:#222;text-decoration:none;">{title}</a></li>'
+        source_url = html.escape(
+            str(article.get("source_url") or article.get("link") or ""),
+            quote=True,
         )
+        if source_url:
+            # 一覧のタイトルを押したら、朝刊内ではなく配信元の記事を直接開く。
+            parts.append(
+                f'<li><a href="{source_url}" target="_blank" rel="noopener noreferrer" '
+                f'style="color:#222;text-decoration:none;">{title}</a></li>'
+            )
+        else:
+            parts.append(f"<li>{title}</li>")
 
     parts.extend(["</ol>", "</div>"])
     return "\n".join(parts)
@@ -303,7 +311,6 @@ def render_mail_html(
         article_text = truncate_for_mail(str(article.get("article_text") or "").strip(), preview_chars)
         meta = article_meta_html(article)
 
-        # name属性も付け、メールクライアントでのページ内リンク互換性を高める。
         parts.append(f'<a id="article-{index}" name="article-{index}"></a>')
         parts.append(f"<h2>{index}. {title}</h2>")
         if meta:
